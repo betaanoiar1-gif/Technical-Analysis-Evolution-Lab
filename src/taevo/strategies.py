@@ -57,10 +57,23 @@ class Strategy:
 
 
 def add_filters(candidates: list[Candidate]) -> list[Strategy]:
-    strategies = [Strategy(c) for c in candidates]
+    strategies: list[Strategy] = []
+    filters = ("above_sma200", "positive_roc", "low_volatility")
+
     for c in candidates:
-        for f in ("above_sma200", "positive_roc", "low_volatility"):
-            strategies.append(Strategy(c, (f,)))
+        strategies.append(Strategy(c, directional=False))
+
+    for c in candidates:
+        for f in filters:
+            strategies.append(Strategy(c, (f,), directional=False))
+
+    for c in candidates:
+        strategies.append(Strategy(c, directional=True))
+
+    for c in candidates:
+        for f in filters:
+            strategies.append(Strategy(c, (f,), directional=True))
+
     return strategies
 
 
@@ -92,11 +105,26 @@ def mutate_strategy(strategy: Strategy, rng: np.random.Generator) -> Strategy:
         "lookback": (3, 30, int), "body_ratio": (0.45, 0.90, float),
     }
     if not p:
-        return strategy
+        return Strategy(
+            _candidate_from_parts(strategy.candidate.school, p),
+            strategy.filters,
+            directional=not strategy.directional if rng.random() < 0.20 else strategy.directional,
+        )
+
     key = str(rng.choice(list(p)))
     if key in changes:
         lo, hi, cast = changes[key]
         p[key] = cast(np.clip(float(p[key]) * rng.uniform(0.75, 1.25), lo, hi))
+
     if "fast" in p and "slow" in p and p["fast"] >= p["slow"]:
         p["fast"], p["slow"] = max(4, p["slow"] - 1), min(160, p["fast"] + 1)
-    return Strategy(_candidate_from_parts(strategy.candidate.school, p), strategy.filters, directional=strategy.directional)
+
+    directional = strategy.directional
+    if rng.random() < 0.20:
+        directional = not directional
+
+    return Strategy(
+        _candidate_from_parts(strategy.candidate.school, p),
+        strategy.filters,
+        directional=directional,
+    )
