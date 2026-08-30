@@ -21,13 +21,17 @@ def main() -> None:
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     bundle = load_csv(args.csv, args.symbol, args.timeframe) if args.csv else fetch_exchange(args.symbol, args.timeframe, args.limit, args.exchange)
     report = run_experiment(bundle, cfg)
-    best = report["best_development"][0] if report["best_development"] else None
+    candidates = report["best_accepted_development"]
     print(f"Run: {report['manifest']['run_id']}")
     print(f"Data: {bundle.symbol} {bundle.timeframe} rows={len(bundle.frame)}")
-    if best:
-        print(f"Best development candidate: {best['strategy']}")
+    if candidates:
+        best = candidates[0]
+        print(f"Selected candidate: {best['strategy']}")
         print(f"Validation score: {best['validation']['score']:.4f}")
-        print(f"Rejected: {best['rejected']} | reasons={best['rejection_reasons']}")
+        print(f"Holdout return: {best['holdout']['total_return']:.4%}")
+        print(f"Holdout max drawdown: {best['holdout']['max_drawdown']:.4%}")
+    else:
+        print("No candidate passed development validation.")
 
 
 if __name__ == "__main__":
