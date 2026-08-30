@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "technical-analysis-evolution-lab"
+version = "0.1.0"
+description = "Research laboratory for evolving technical-analysis trading strategies"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "PyYAML>=6.0,<7",
+  "matplotlib>=3.8,<4",
+  "ccxt>=4.5,<5",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
