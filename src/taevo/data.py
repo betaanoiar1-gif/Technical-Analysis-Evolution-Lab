@@ -19,6 +19,35 @@ class DataBundle:
     fingerprint: str
 
 
+def _parse_timestamp(values: pd.Series) -> pd.DatetimeIndex:
+    """Parse common Unix timestamp encodings safely.
+
+    Exchange APIs commonly return Unix milliseconds. CSV files may contain
+    seconds, milliseconds, microseconds, nanoseconds, or ISO-8601 strings.
+    Infer numeric units from magnitude so a millisecond timestamp is never
+    silently interpreted as nanoseconds (which would produce dates near 1970).
+    """
+    numeric = pd.to_numeric(values, errors="coerce")
+    numeric_ratio = float(numeric.notna().mean()) if len(values) else 0.0
+
+    if numeric_ratio >= 0.99:
+        clean = numeric.dropna()
+        if clean.empty:
+            return pd.to_datetime(values, utc=True, errors="coerce")
+        magnitude = float(clean.abs().median())
+        if magnitude >= 1e17:
+            unit = "ns"
+        elif magnitude >= 1e14:
+            unit = "us"
+        elif magnitude >= 1e11:
+            unit = "ms"
+        else:
+            unit = "s"
+        return pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
+
+    return pd.to_datetime(values, utc=True, errors="coerce")
+
+
 def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
     df = frame.copy()
     rename = {c.lower().strip(): c.lower().strip() for c in df.columns}
@@ -28,11 +57,13 @@ def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
         raise ValueError(f"Missing OHLCV columns: {sorted(missing)}")
     if not isinstance(df.index, pd.DatetimeIndex):
         if "timestamp" in df.columns:
-            df.index = pd.to_datetime(df.pop("timestamp"), utc=True)
+            df.index = _parse_timestamp(df.pop("timestamp"))
         else:
             raise ValueError("Data must use a DatetimeIndex or contain a timestamp column")
-    df.index = pd.to_datetime(df.index, utc=True)
-    df = df[COLUMNS].apply(pd.to_numeric, errors="coerce").dropna()
+    df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+    df = df[COLUMNS].apply(pd.to_numeric, errors="coerce")
+    valid = df.notna().all(axis=1) & df.index.notna()
+    df = df.loc[valid]
     df = df[~df.index.duplicated(keep="last")].sort_index()
     if len(df) < 100:
         raise ValueError("At least 100 valid OHLCV rows are required")
