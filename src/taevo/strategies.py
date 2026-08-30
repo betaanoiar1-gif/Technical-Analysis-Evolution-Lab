@@ -12,29 +12,48 @@ from .schools import Candidate
 class Strategy:
     candidate: Candidate
     filters: tuple[str, ...] = ()
+    directional: bool = False
 
     @property
     def name(self) -> str:
-        return self.candidate.name + ("+" + "+".join(self.filters) if self.filters else "")
+        suffix = "+" + "+".join(self.filters) if self.filters else ""
+        mode = "+directional" if self.directional else ""
+        return self.candidate.name + suffix + mode
 
     @property
     def complexity(self) -> int:
-        return self.candidate.complexity + len(self.filters)
+        return self.candidate.complexity + len(self.filters) + int(self.directional)
 
     def signal(self, df: pd.DataFrame) -> pd.Series:
-        result = self.candidate.builder(df).astype(bool)
+        if self.directional and self.candidate.directional_builder is not None:
+            result = self.candidate.directional_builder(df).copy()
+        else:
+            result = self.candidate.builder(df).astype(bool).astype(int)
+
         for item in self.filters:
             if item == "above_sma200":
                 sma = df.close.rolling(200, min_periods=200).mean()
-                result &= df.close > sma
+                mask = df.close > sma
             elif item == "positive_roc":
-                result &= df.close.pct_change(20) > 0
+                mask = df.close.pct_change(20) > 0
             elif item == "low_volatility":
                 vol = df.close.pct_change().rolling(20, min_periods=20).std()
-                result &= vol < vol.rolling(100, min_periods=100).median()
+                mask = vol < vol.rolling(100, min_periods=100).median()
             else:
                 raise ValueError(f"Unknown filter: {item}")
-        return result.fillna(False).astype(int)
+
+            if self.directional:
+                result = result.where(mask, 0)
+            else:
+                result = result.astype(bool) & mask
+
+        if self.directional:
+            result = pd.to_numeric(result, errors="coerce").fillna(0)
+            result = result.where(result.isin([-1, 0, 1]), 0).astype(int)
+        else:
+            result = result.fillna(False).astype(int)
+
+        return result
 
 
 def add_filters(candidates: list[Candidate]) -> list[Strategy]:
@@ -60,7 +79,9 @@ def strategy_from_record(record: dict) -> Strategy:
     validation = record["validation"]
     base_name, *filters = str(record["strategy"]).split("+")
     candidate = _candidate_from_parts(validation["school"], validation["params"])
-    return Strategy(candidate, tuple(filters))
+    directional = str(record["strategy"]).endswith("+directional")
+    filters = [f for f in filters if f != "directional"]
+    return Strategy(candidate, tuple(filters), directional=directional)
 
 
 def mutate_strategy(strategy: Strategy, rng: np.random.Generator) -> Strategy:
@@ -78,4 +99,4 @@ def mutate_strategy(strategy: Strategy, rng: np.random.Generator) -> Strategy:
         p[key] = cast(np.clip(float(p[key]) * rng.uniform(0.75, 1.25), lo, hi))
     if "fast" in p and "slow" in p and p["fast"] >= p["slow"]:
         p["fast"], p["slow"] = max(4, p["slow"] - 1), min(160, p["fast"] + 1)
-    return Strategy(_candidate_from_parts(strategy.candidate.school, p), strategy.filters)
+    return Strategy(_candidate_from_parts(strategy.candidate.school, p), strategy.filters, directional=strategy.directional)
