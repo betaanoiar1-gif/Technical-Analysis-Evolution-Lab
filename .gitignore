@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+env/
+.env
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+reports/*.html
+reports/*.json
+experiments/runs/*
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
