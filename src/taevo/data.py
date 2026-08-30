@@ -20,24 +20,27 @@ class DataBundle:
 
 
 def _parse_timestamp(values: pd.Series) -> pd.DatetimeIndex:
-    """Parse common Unix timestamp encodings safely."""
-    numeric = pd.to_numeric(values, errors="coerce")
-    numeric_ratio = float(numeric.notna().mean()) if len(values) else 0.0
+    """Parse Unix seconds/milliseconds/microseconds/nanoseconds or ISO-8601."""
+    raw = pd.Series(values)
+    numeric = pd.to_numeric(raw, errors="coerce")
+    numeric_ratio = float(numeric.notna().mean()) if len(raw) else 0.0
     if numeric_ratio >= 0.99:
         clean = numeric.dropna()
-        if clean.empty:
-            return pd.to_datetime(values, utc=True, errors="coerce")
-        magnitude = float(clean.abs().median())
-        if magnitude >= 1e17:
-            unit = "ns"
-        elif magnitude >= 1e14:
-            unit = "us"
-        elif magnitude >= 1e11:
-            unit = "ms"
-        else:
-            unit = "s"
-        return pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
-    return pd.to_datetime(values, utc=True, errors="coerce")
+        if not clean.empty:
+            magnitude = float(clean.abs().median())
+            # Current Unix timestamps are approximately 1e9 seconds or 1e12 ms.
+            if magnitude >= 1e17:
+                unit = "ns"
+            elif magnitude >= 1e14:
+                unit = "us"
+            elif magnitude >= 1e11:
+                unit = "ms"
+            else:
+                unit = "s"
+            parsed = pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
+            if parsed.notna().mean() >= 0.99:
+                return pd.DatetimeIndex(parsed)
+    return pd.DatetimeIndex(pd.to_datetime(raw, utc=True, errors="coerce"))
 
 
 def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
@@ -52,13 +55,18 @@ def normalize_ohlcv(frame: pd.DataFrame) -> pd.DataFrame:
             df.index = _parse_timestamp(df.pop("timestamp"))
         else:
             raise ValueError("Data must use a DatetimeIndex or contain a timestamp column")
-    df.index = pd.to_datetime(df.index, utc=True, errors="coerce")
+    else:
+        # Do not reinterpret an already-parsed DatetimeIndex as raw integers.
+        df.index = pd.DatetimeIndex(df.index).tz_convert("UTC") if df.index.tz is not None else pd.DatetimeIndex(df.index).tz_localize("UTC")
+
     df = df[COLUMNS].apply(pd.to_numeric, errors="coerce")
     valid = df.notna().all(axis=1) & df.index.notna()
     df = df.loc[valid]
     df = df[~df.index.duplicated(keep="last")].sort_index()
     if len(df) < 100:
         raise ValueError("At least 100 valid OHLCV rows are required")
+    if not df.index.empty and (df.index[-1].year < 2000 or df.index[0].year < 2000):
+        raise ValueError("Timestamp parsing produced an implausible date range")
     if (df[["high", "low", "close"]] <= 0).any().any():
         raise ValueError("Prices must be positive")
     if (df["high"] < df[["open", "close"]].max(axis=1)).any():
@@ -93,8 +101,6 @@ def fetch_exchange(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int =
     if not rows:
         raise RuntimeError("Exchange returned no OHLCV rows")
     frame = pd.DataFrame(rows, columns=["timestamp", *COLUMNS])
-    # ccxt OHLCV timestamps are Unix milliseconds by contract.
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True, errors="coerce")
     df = normalize_ohlcv(frame)
     return DataBundle(df, symbol, timeframe, f"ccxt:{exchange_id}", fingerprint(df))
 
