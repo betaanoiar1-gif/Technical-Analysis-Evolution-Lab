@@ -20,16 +20,9 @@ class DataBundle:
 
 
 def _parse_timestamp(values: pd.Series) -> pd.DatetimeIndex:
-    """Parse common Unix timestamp encodings safely.
-
-    Exchange APIs commonly return Unix milliseconds. CSV files may contain
-    seconds, milliseconds, microseconds, nanoseconds, or ISO-8601 strings.
-    Infer numeric units from magnitude so a millisecond timestamp is never
-    silently interpreted as nanoseconds (which would produce dates near 1970).
-    """
+    """Parse common Unix timestamp encodings safely."""
     numeric = pd.to_numeric(values, errors="coerce")
     numeric_ratio = float(numeric.notna().mean()) if len(values) else 0.0
-
     if numeric_ratio >= 0.99:
         clean = numeric.dropna()
         if clean.empty:
@@ -44,7 +37,6 @@ def _parse_timestamp(values: pd.Series) -> pd.DatetimeIndex:
         else:
             unit = "s"
         return pd.to_datetime(numeric, unit=unit, utc=True, errors="coerce")
-
     return pd.to_datetime(values, utc=True, errors="coerce")
 
 
@@ -101,6 +93,8 @@ def fetch_exchange(symbol: str = "BTC/USDT", timeframe: str = "1h", limit: int =
     if not rows:
         raise RuntimeError("Exchange returned no OHLCV rows")
     frame = pd.DataFrame(rows, columns=["timestamp", *COLUMNS])
+    # ccxt OHLCV timestamps are Unix milliseconds by contract.
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], unit="ms", utc=True, errors="coerce")
     df = normalize_ohlcv(frame)
     return DataBundle(df, symbol, timeframe, f"ccxt:{exchange_id}", fingerprint(df))
 
