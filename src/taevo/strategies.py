@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -22,8 +22,7 @@ class Strategy:
         return self.candidate.complexity + len(self.filters)
 
     def signal(self, df: pd.DataFrame) -> pd.Series:
-        base = self.candidate.builder(df).astype(bool)
-        result = base.copy()
+        result = self.candidate.builder(df).astype(bool)
         for item in self.filters:
             if item == "above_sma200":
                 sma = df.close.rolling(200, min_periods=200).mean()
@@ -46,6 +45,24 @@ def add_filters(candidates: list[Candidate]) -> list[Strategy]:
     return strategies
 
 
+def _candidate_from_parts(school: str, params: dict) -> Candidate:
+    from .schools import breakout_candidate, mean_reversion_candidate, momentum_candidate, price_action_candidate, trend_candidate, volume_breakout_candidate
+    if school == "trend": return trend_candidate(int(params["fast"]), int(params["slow"]))
+    if school == "momentum": return momentum_candidate(int(params["period"]), float(params["threshold"]))
+    if school == "mean_reversion": return mean_reversion_candidate(int(params["period"]), float(params["width"]))
+    if school == "breakout": return breakout_candidate(int(params["period"]))
+    if school == "volume": return volume_breakout_candidate(int(params["period"]), float(params["relvol"]))
+    if school == "price_action": return price_action_candidate(int(params["lookback"]), float(params["body_ratio"]))
+    raise ValueError(f"Unknown school: {school}")
+
+
+def strategy_from_record(record: dict) -> Strategy:
+    validation = record["validation"]
+    base_name, *filters = str(record["strategy"]).split("+")
+    candidate = _candidate_from_parts(validation["school"], validation["params"])
+    return Strategy(candidate, tuple(filters))
+
+
 def mutate_strategy(strategy: Strategy, rng: np.random.Generator) -> Strategy:
     p = dict(strategy.candidate.params)
     changes = {
@@ -58,21 +75,7 @@ def mutate_strategy(strategy: Strategy, rng: np.random.Generator) -> Strategy:
     key = str(rng.choice(list(p)))
     if key in changes:
         lo, hi, cast = changes[key]
-        center = float(p[key])
-        p[key] = cast(np.clip(center * rng.uniform(0.75, 1.25), lo, hi))
+        p[key] = cast(np.clip(float(p[key]) * rng.uniform(0.75, 1.25), lo, hi))
     if "fast" in p and "slow" in p and p["fast"] >= p["slow"]:
-        p["fast"], p["slow"] = min(p["fast"], p["slow"] - 1), max(p["slow"], p["fast"] + 1)
-    # Rebuild known school candidate using the mutated parameters.
-    c = replace(strategy.candidate, params=p)
-    from .schools import (
-        breakout_candidate, mean_reversion_candidate, momentum_candidate,
-        price_action_candidate, trend_candidate, volume_breakout_candidate,
-    )
-    school = c.school
-    if school == "trend": c = trend_candidate(p["fast"], p["slow"])
-    elif school == "momentum": c = momentum_candidate(p["period"], p["threshold"])
-    elif school == "mean_reversion": c = mean_reversion_candidate(p["period"], p["width"])
-    elif school == "breakout": c = breakout_candidate(p["period"])
-    elif school == "volume": c = volume_breakout_candidate(p["period"], p["relvol"])
-    elif school == "price_action": c = price_action_candidate(p["lookback"], p["body_ratio"])
-    return Strategy(c, strategy.filters)
+        p["fast"], p["slow"] = max(4, p["slow"] - 1), min(160, p["fast"] + 1)
+    return Strategy(_candidate_from_parts(strategy.candidate.school, p), strategy.filters)
