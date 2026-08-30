@@ -1,0 +1,31 @@
+project:
+  name: Technical-Analysis-Evolution-Lab
+  version: 0.1.0
+
+capital:
+  initial_usd: 1000.0
+
+costs:
+  fee_bps: 10.0
+  slippage_bps: 5.0
+
+validation:
+  train_ratio: 0.55
+  validation_ratio: 0.20
+  holdout_ratio: 0.25
+  walk_forward_windows: 5
+  min_trades: 30
+  robustness_trials: 12
+
+search:
+  seed: 42
+  candidates_per_cycle: 48
+  cycles: 4
+  elite_fraction: 0.20
+  mutation_rate: 0.25
+
+constraints:
+  max_turnover: 250.0
+  max_drawdown: 0.35
+  min_profit_factor: 1.05
+  max_complexity: 6
